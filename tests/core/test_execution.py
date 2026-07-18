@@ -1,6 +1,7 @@
 import pytest
 
 from p4alpha.core.execution import (
+    exposure_capped_size,
     position_tier_size,
     quote_one_tick_better,
     threshold_take_price,
@@ -79,6 +80,49 @@ def test_tier_size_rejects_tied_thresholds():
 def test_tier_size_rejects_negative_order_size():
     with pytest.raises(ValueError):
         position_tier_size(1.0, [(1.0, -5)], position=0, limit=10, side="buy")
+
+
+# exposure_capped_size
+
+
+def test_exposure_cap_buy_unclamped_when_room_exceeds_candidate():
+    assert exposure_capped_size(10, current_exposure=0.0, cap=100.0) == 10
+
+
+def test_exposure_cap_buy_clamped_to_remaining_room():
+    assert exposure_capped_size(10, current_exposure=95.0, cap=100.0) == 5
+
+
+def test_exposure_cap_buy_at_or_past_cap_returns_zero():
+    assert exposure_capped_size(10, current_exposure=100.0, cap=100.0) == 0
+    assert exposure_capped_size(10, current_exposure=150.0, cap=100.0) == 0
+
+
+def test_exposure_cap_sell_clamped_to_remaining_room_below_negative_cap():
+    # current_exposure=-95, cap=100 -> room = max(0, -95 + 100) = 5.
+    assert exposure_capped_size(-10, current_exposure=-95.0, cap=100.0) == -5
+
+
+def test_exposure_cap_sell_at_or_past_negative_cap_returns_zero():
+    assert exposure_capped_size(-10, current_exposure=-100.0, cap=100.0) == 0
+    assert exposure_capped_size(-10, current_exposure=-150.0, cap=100.0) == 0
+
+
+def test_exposure_cap_zero_candidate_returns_zero():
+    assert exposure_capped_size(0, current_exposure=0.0, cap=100.0) == 0
+
+
+def test_exposure_cap_room_truncates_toward_zero_never_exceeding_cap():
+    # room = 100 - 95.7 = 4.3 -> truncated to 4, not rounded to 5, so
+    # current_exposure + result never exceeds cap.
+    assert exposure_capped_size(10, current_exposure=95.7, cap=100.0) == 4
+
+
+def test_exposure_cap_rejects_non_positive_cap():
+    with pytest.raises(ValueError):
+        exposure_capped_size(10, current_exposure=0.0, cap=0.0)
+    with pytest.raises(ValueError):
+        exposure_capped_size(10, current_exposure=0.0, cap=-5.0)
 
 
 # threshold_take_price

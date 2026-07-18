@@ -3,7 +3,9 @@
 list of tiers (a handful of entries), not a bisect: O(n) is trivial here
 and bisect would need an extra key-extraction wrapper for no real gain.
 Stdlib only, per PLAN.md §4 (this module ships inside the flattened
-submission).
+submission). exposure_capped_size was added in Stage 5 for
+strategies/round3.py's correlation-stacking exposure cap (STATE.md
+decisions log).
 """
 
 from __future__ import annotations
@@ -59,6 +61,43 @@ def position_tier_size(
     else:
         room = max(0, position + limit)
     return min(size, room)
+
+
+def exposure_capped_size(
+    candidate_quantity: int,
+    *,
+    current_exposure: float,
+    cap: float,
+) -> int:
+    """Clamp a candidate signed order quantity so current_exposure plus its
+    contribution never pushes an aggregate exposure figure beyond +-cap, in
+    whichever direction candidate_quantity moves it (positive grows
+    exposure, negative shrinks it). Generalises position_tier_size's own
+    limit clamp from a caller's single integer position to an externally
+    computed float exposure (e.g. a portfolio's net delta to a correlated
+    underlying, stacked across several instruments a single instrument's
+    own position limit cannot bound; added in Stage 5, STATE.md decisions
+    log, for strategies/round3.py's correlation-stacking exposure cap).
+
+    Returns 0 if current_exposure already meets or exceeds the cap in the
+    same direction as candidate_quantity. Preserves candidate_quantity's
+    sign; magnitude only ever shrinks, never grows. Room is truncated
+    toward zero (int()) rather than rounded, since exposure is a
+    fractional delta-weighted figure but order quantity is integral, and
+    truncating is the direction that never lets the cap be exceeded.
+
+    Raises ValueError if cap <= 0.
+    """
+    if cap <= 0:
+        raise ValueError(f"cap must be > 0, got {cap}")
+
+    if candidate_quantity > 0:
+        room = max(0.0, cap - current_exposure)
+        return min(candidate_quantity, int(room))
+    if candidate_quantity < 0:
+        room = max(0.0, cap + current_exposure)
+        return -min(-candidate_quantity, int(room))
+    return 0
 
 
 def threshold_take_price(

@@ -17,7 +17,7 @@ import math
 
 import pytest
 
-from p4alpha.core.options import black_scholes_call, implied_vol_call, norm_cdf
+from p4alpha.core.options import black_scholes_call, black_scholes_call_delta, implied_vol_call, norm_cdf
 
 ERF_ORACLE_MAX_ERROR = 7.5e-8
 BISECTION_TOL = 1e-6
@@ -111,6 +111,49 @@ def test_black_scholes_call_raises_on_non_positive_vol():
         black_scholes_call(100.0, 100.0, 0.5, 0.0)
     with pytest.raises(ValueError):
         black_scholes_call(100.0, 100.0, 0.5, -0.1)
+
+
+@pytest.mark.parametrize("spot,strike,time_to_expiry,vol", _BS_PARAM_SETS)
+def test_black_scholes_call_delta_matches_finite_difference(spot, strike, time_to_expiry, vol):
+    eps = spot * 1e-5
+    numeric = (
+        black_scholes_call(spot + eps, strike, time_to_expiry, vol)
+        - black_scholes_call(spot - eps, strike, time_to_expiry, vol)
+    ) / (2 * eps)
+    assert black_scholes_call_delta(spot, strike, time_to_expiry, vol) == pytest.approx(numeric, abs=1e-4)
+
+
+def test_black_scholes_call_delta_bounded_between_zero_and_one():
+    for moneyness in (0.5, 0.8, 1.0, 1.2, 2.0):
+        delta = black_scholes_call_delta(100.0, 100.0 * moneyness, 0.5, 0.2)
+        assert 0.0 < delta < 1.0
+
+
+def test_black_scholes_call_delta_approaches_one_deep_itm_and_zero_deep_otm():
+    deep_itm = black_scholes_call_delta(10000.0, 100.0, 0.5, 0.2)
+    deep_otm = black_scholes_call_delta(100.0, 10000.0, 0.5, 0.2)
+    assert deep_itm == pytest.approx(1.0, abs=1e-6)
+    assert deep_otm == pytest.approx(0.0, abs=1e-6)
+
+
+def test_black_scholes_call_delta_raises_on_non_positive_spot():
+    with pytest.raises(ValueError):
+        black_scholes_call_delta(0.0, 100.0, 0.5, 0.2)
+
+
+def test_black_scholes_call_delta_raises_on_non_positive_strike():
+    with pytest.raises(ValueError):
+        black_scholes_call_delta(100.0, 0.0, 0.5, 0.2)
+
+
+def test_black_scholes_call_delta_raises_on_non_positive_time_to_expiry():
+    with pytest.raises(ValueError):
+        black_scholes_call_delta(100.0, 100.0, 0.0, 0.2)
+
+
+def test_black_scholes_call_delta_raises_on_non_positive_vol():
+    with pytest.raises(ValueError):
+        black_scholes_call_delta(100.0, 100.0, 0.5, 0.0)
 
 
 _IV_ROUND_TRIP_PARAM_SETS = [

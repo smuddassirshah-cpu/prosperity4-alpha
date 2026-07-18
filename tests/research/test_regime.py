@@ -6,12 +6,15 @@ import pandas as pd
 import pytest
 
 from p4alpha.research.regime import (
+    ROUND3_PRODUCTS,
     block_bootstrap_trend_pvalue,
     drifting_fraction,
     fit_linear_trend,
     fit_ou_regime,
     main,
+    main_round3,
     render_regime_markdown,
+    render_round3_regime_markdown,
     zscore_tier_calibration,
 )
 
@@ -147,6 +150,92 @@ def test_regenerating_round1_regime_reproduces_committed_artifact_byte_for_byte(
     committed_content = out_path.read_text(encoding="utf-8")
 
     main(1, (-2, -1, 0))
+
+    regenerated_content = out_path.read_text(encoding="utf-8")
+    assert regenerated_content == committed_content
+
+
+def test_regenerating_round2_regime_reproduces_committed_artifact_byte_for_byte():
+    # Same discipline as the round 1 test above, extended to round 2's
+    # already-committed, approved Stage 4 artifact (previously untested,
+    # closing the gap the Stage 5 round-3 work was asked to check for).
+    out_path = Path("docs/results/round2/regime.md")
+    committed_content = out_path.read_text(encoding="utf-8")
+
+    main(2, (-1, 0, 1), include_drift=True)
+
+    regenerated_content = out_path.read_text(encoding="utf-8")
+    assert regenerated_content == committed_content
+
+
+def test_round3_products_are_the_two_confirmed_non_option_names():
+    # Guards against a silent typo: these are the exact product strings
+    # confirmed present in the real round 3 data (STATE.md decisions log
+    # equivalent for round 3), distinct from the ten VEV_* voucher products.
+    assert ROUND3_PRODUCTS == ("HYDROGEL_PACK", "VELVETFRUIT_EXTRACT")
+
+
+def test_render_round3_regime_markdown_smoke():
+    t = np.arange(0, 500, 100)
+    pack_df = _df(t, 10000.0 + 0.01 * t, product="HYDROGEL_PACK")
+    fruit_df = _df(t, [5250.0, 5251.0, 5249.0, 5252.0, 5248.0], product="VELVETFRUIT_EXTRACT")
+    fruit_series = [5250.0, 5251.0, 5249.0, 5252.0, 5248.0]
+
+    rng = np.random.default_rng(0)
+    trends = {
+        "HYDROGEL_PACK": {0: fit_linear_trend(pack_df)},
+        "VELVETFRUIT_EXTRACT": {0: fit_linear_trend(fruit_df)},
+    }
+    ou_fits = {
+        "HYDROGEL_PACK": {0: fit_ou_regime(pack_df)},
+        "VELVETFRUIT_EXTRACT": {0: fit_ou_regime(fruit_df)},
+    }
+    pack_p = block_bootstrap_trend_pvalue(list(pack_df["mid_price"]), block_length=2, n_bootstrap=20, rng=rng)
+    fruit_p = block_bootstrap_trend_pvalue(fruit_series, block_length=2, n_bootstrap=20, rng=rng)
+    significance = {
+        "HYDROGEL_PACK": {0: (1.0, pack_p)},
+        "VELVETFRUIT_EXTRACT": {0: (0.1, fruit_p)},
+    }
+
+    markdown = render_round3_regime_markdown(3, trends, ou_fits, significance, package_version="5.0.0")
+
+    assert "Round 3" in markdown
+    assert "HYDROGEL_PACK" in markdown
+    assert "VELVETFRUIT_EXTRACT" in markdown
+    assert "Half-life" in markdown
+    assert "Interpretation" in markdown
+    assert "5.0.0" in markdown
+    # no two-layer/z-tier calibration table: round 3 has no established
+    # two-layer fair-value research and neither product was found
+    # mean-reverting enough to warrant one (see the Interpretation section).
+    assert "z-tier calibration" not in markdown.split("## Interpretation")[0]
+
+
+def test_render_round3_regime_markdown_includes_run_metadata():
+    t = np.arange(0, 300, 100)
+    pack_df = _df(t, [10000.0, 10001.0, 9999.0], product="HYDROGEL_PACK")
+    fruit_df = _df(t, [5250.0, 5251.0, 5249.0], product="VELVETFRUIT_EXTRACT")
+
+    trends = {"HYDROGEL_PACK": {1: fit_linear_trend(pack_df)}, "VELVETFRUIT_EXTRACT": {1: fit_linear_trend(fruit_df)}}
+    ou_fits = {"HYDROGEL_PACK": {1: fit_ou_regime(pack_df)}, "VELVETFRUIT_EXTRACT": {1: fit_ou_regime(fruit_df)}}
+    significance = {"HYDROGEL_PACK": {1: (0.5, 0.01)}, "VELVETFRUIT_EXTRACT": {1: (0.05, 0.4)}}
+
+    markdown = render_round3_regime_markdown(3, trends, ou_fits, significance, package_version="5.0.0")
+
+    assert "src/p4alpha/research/regime.py" in markdown
+    assert "main_round3" in markdown
+    assert "[1]" in markdown  # round-days list rendered in the metadata line
+    assert "prosperity4btest==5.0.0" in markdown
+
+
+def test_main_round3_regenerates_committed_artifact_byte_for_byte():
+    # Same byte-for-byte discipline as round 1/round 2 above, now protecting
+    # round 3's own newly-committed regime.md against future silent changes
+    # to this module (e.g. from the parallel option-surface research).
+    out_path = Path("docs/results/round3/regime.md")
+    committed_content = out_path.read_text(encoding="utf-8")
+
+    main_round3((0, 1, 2))
 
     regenerated_content = out_path.read_text(encoding="utf-8")
     assert regenerated_content == committed_content

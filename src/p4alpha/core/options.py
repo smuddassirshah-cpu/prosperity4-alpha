@@ -7,6 +7,10 @@ project's test file for it used as an independent oracle only).
 implied_vol_call is plain bisection: price is monotonic increasing in vol
 for a call, so bisection on [lo, hi] always converges given a bracketing
 price, no Newton/vega step needed at this precision budget.
+black_scholes_call_delta was added in Stage 5 (strategies/round3.py needs
+a live per-tick delta to measure and cap correlation-stacking exposure
+across the FRUIT-linked vouchers; STATE.md decisions log records this
+extension).
 """
 
 from __future__ import annotations
@@ -56,6 +60,29 @@ def black_scholes_call(
     d1 = (math.log(spot / strike) + (rate + 0.5 * vol * vol) * time_to_expiry) / (vol * sqrt_t)
     d2 = d1 - vol * sqrt_t
     return spot * norm_cdf(d1) - strike * math.exp(-rate * time_to_expiry) * norm_cdf(d2)
+
+
+def black_scholes_call_delta(
+    spot: float, strike: float, time_to_expiry: float, vol: float, rate: float = 0.0
+) -> float:
+    """European call delta, dPrice/dSpot = N(d1) exactly (the S*N(d1) and
+    -K*exp(-rT)*N(d2) terms' spot-derivatives cancel in the standard
+    derivation, leaving just N(d1)); no separate closed form needed beyond
+    norm_cdf. Raises the same ValueErrors as black_scholes_call for the
+    same invalid inputs, since d1 is undefined otherwise.
+    """
+    if spot <= 0:
+        raise ValueError(f"spot must be > 0, got {spot}")
+    if strike <= 0:
+        raise ValueError(f"strike must be > 0, got {strike}")
+    if time_to_expiry <= 0:
+        raise ValueError(f"time_to_expiry must be > 0, got {time_to_expiry}")
+    if vol <= 0:
+        raise ValueError(f"vol must be > 0, got {vol}")
+
+    sqrt_t = math.sqrt(time_to_expiry)
+    d1 = (math.log(spot / strike) + (rate + 0.5 * vol * vol) * time_to_expiry) / (vol * sqrt_t)
+    return norm_cdf(d1)
 
 
 def implied_vol_call(
