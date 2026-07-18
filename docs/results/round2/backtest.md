@@ -208,16 +208,26 @@ these figures and states that plainly**), the EV case:
 - A token bid (e.g. 1) very likely sits below the stated historical
   clearing range, forfeiting the edge entirely for a saving that is
   economically irrelevant next to it.
-- No data supports bidding meaningfully above the documented ceiling:
-  the mechanic described is a threshold cutoff (top 50%), not a
-  continuously-increasing benefit with bid size, so paying more than
-  the ceiling needed to clear has no modelled additional upside.
+- Under a pay-your-bid threshold mechanic the downside is asymmetric:
+  missing the clearing cutoff forfeits the whole stated 800-2000/day
+  edge, while bidding above the historical ceiling only ever costs the
+  small extra amount if accepted. That asymmetry justifies a margin
+  above the 151 anchor rather than bidding exactly at it: the 151
+  figure is a reviewer-stated historical range, not a guaranteed
+  ceiling, and undershooting it is far more costly than overshooting.
 
-`MARKET_ACCESS_BID` is set to **151** (the top of the stated historical
-range) accordingly. As stated above, the local engine cannot simulate
-other bidders, so this project cannot verify whether 151 actually clears
-in any specific round instance; it is a live-round assumption anchored
-to the given historical range, not a locally-confirmable fact.
+`MARKET_ACCESS_BID` is set to **200**: ~50 above the 151 anchor, at most
+~50 more expensive if accepted (roughly 0.03% of the round's raw PnL),
+bought as insurance against the clearing threshold sitting anywhere in
+or above the stated historical range. 200 is not derived from the
+anchor itself, only margin added above it; the mechanic described is a
+threshold cutoff (top 50%), not a continuously-increasing benefit with
+bid size, so paying more than needed to clear has no modelled
+additional upside beyond that margin. As stated above, the local engine
+cannot simulate other bidders, so this project cannot verify whether
+200 actually clears in any specific round instance; it is a live-round
+assumption anchored to the given historical range plus margin, not a
+locally-confirmable fact.
 
 ## 6. Final side-by-side (round2.py now matches round1.py on ASH exactly)
 
@@ -231,16 +241,16 @@ to the given historical range, not a locally-confirmable fact.
 | 1 | INTARIAN_PEPPER_ROOT | 49,393.00 | 0.02782 | 1,050.00 | 8 | 50 | 0 |
 
 Grand total (raw): 151,991.00. Fee-accepted total (`--round2-access
-accepted`): **151,840.00** (`Trader.bid()` = 151, subtracted once for the
+accepted`): **151,791.00** (`Trader.bid()` = 200, subtracted once for the
 round, confirmed via a combined all-days invocation: `round2_profit_
-before_maf: 151,991`, `round2_profit_after_maf: 151,840`).
+before_maf: 151,991`, `round2_profit_after_maf: 151,791`).
 
 ## Run metadata
 
 - Strategy files: `src/p4alpha/strategies/round1.py`, `src/p4alpha/strategies/round2.py`
 - Round-days: 2--1, 2-0, 2-1
 - `prosperity4btest` version: 5.0.0
-- `--round2-access accepted`, `Trader.bid()` = 151
+- `--round2-access accepted`, `Trader.bid()` = 200
 - Position limit: 50 (STATE.md decisions log, 2026-07-18)
 
 ## Reproduce

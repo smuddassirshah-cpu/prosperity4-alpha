@@ -6,8 +6,16 @@ flattener can concatenate one round's file cleanly with core/; this is a
 deliberate duplication, checked byte-for-byte against round1.py by
 tests/strategies/test_round2.py's source-equality test).
 
-ASH (ASH_COATED_OSMIUM) is also unchanged from round1.py, after a
-thoroughly negative result on drift-gating it (docs/results/round2/
+ASH (ASH_COATED_OSMIUM) is also unchanged from round1.py, but only
+functionally, not textually: round1._trade_ash carries tiers/
+extreme_threshold override kwargs for its leave-one-day-out check that
+this module has no need for, so its signature legitimately differs from
+round1's and a source-equality test would spuriously fail. Parity is
+instead checked by tests/strategies/test_round2.py's constants-match test
+(ASH_ZSCORE_WINDOW, ASH_TIERS, ASH_EXTREME_THRESHOLD,
+ASH_MAX_INNER_DEVIATION) plus a direct assertion that round1._trade_ash's
+tiers/extreme_threshold kwarg defaults equal round2's module constants.
+This follows a thoroughly negative result on drift-gating it (docs/results/round2/
 backtest.md has the full account; summary: docs/results/round2/regime.md
 shows round 2 day 1 has a genuine, statistically significant slow trend,
 block-bootstrap p < 0.001, and the naive strategy's ASH PnL on that day is
@@ -91,13 +99,16 @@ ASH_MAX_INNER_DEVIATION = 1.5
 # a +25% market-bot fill-rate benefit), anchored to the reviewer-supplied
 # historical clearing range (~100-151/day); this project has no
 # independent source for that range and states so in
-# docs/results/round2/backtest.md. 151 is the top of that range: the
-# minimum this project can justify as likely to clear, given the stated
-# per-day edge (800-2000) dwarfs the ~150 cost of bidding there if
-# accepted. The local engine cannot simulate other bidders or the fill
-# benefit, only the cost side, so this is a live-round assumption the
-# backtest cannot verify either way.
-MARKET_ACCESS_BID = 151
+# docs/results/round2/backtest.md. Under a pay-your-bid threshold
+# mechanic, the downside is asymmetric: missing the cutoff forfeits the
+# whole stated 800-2000/day edge, whereas bidding above the historical
+# ceiling only ever costs the small extra amount if accepted. 200 is set
+# as margin above the 151 anchor (~50 extra cost if accepted, insurance
+# against the anchor being a mid-range rather than a ceiling estimate),
+# not a figure derived from the anchor itself. The local engine cannot
+# simulate other bidders or the fill benefit, only the cost side, so this
+# remains a live-round assumption the backtest cannot verify either way.
+MARKET_ACCESS_BID = 200
 
 
 def _book(state, product: str) -> tuple[dict[int, int], dict[int, int]]:

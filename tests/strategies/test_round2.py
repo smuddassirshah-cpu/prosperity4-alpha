@@ -55,6 +55,29 @@ def test_root_constants_match_round1():
     assert round2.ROOT_DEVIATION_GUARD == round1.ROOT_DEVIATION_GUARD
 
 
+# --- ASH parity: round1._trade_ash and round2._trade_ash are not
+# source-identical (round1's signature carries tiers/extreme_threshold
+# override kwargs for the leave-one-day-out check that round2 has no need
+# for), so a source-equality test would spuriously fail even though the
+# two behave identically. Parity is checked at the constants level instead,
+# plus a direct check that round1's override kwargs default to exactly
+# round2's hardcoded module constants. ---
+
+
+def test_ash_constants_match_round1():
+    assert round2.ASH == round1.ASH
+    assert round2.ASH_ZSCORE_WINDOW == round1.ASH_ZSCORE_WINDOW
+    assert round2.ASH_TIERS == round1.ASH_TIERS
+    assert round2.ASH_EXTREME_THRESHOLD == round1.ASH_EXTREME_THRESHOLD
+    assert round2.ASH_MAX_INNER_DEVIATION == round1.ASH_MAX_INNER_DEVIATION
+
+
+def test_round1_trade_ash_kwarg_defaults_match_round2_constants():
+    params = inspect.signature(round1._trade_ash).parameters
+    assert params["tiers"].default == round2.ASH_TIERS
+    assert params["extreme_threshold"].default == round2.ASH_EXTREME_THRESHOLD
+
+
 # --- ROOT behaviour (re-verified directly against this module, not just
 # by the source-equality test above) ---
 
