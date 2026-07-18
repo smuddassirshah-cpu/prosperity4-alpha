@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,7 @@ from p4alpha.harness.run import BacktestError, _parse_args, main, run_backtest, 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
 STARTER = FIXTURES_DIR / "starter.py"
 NO_TRADER_CLASS = FIXTURES_DIR / "no_trader_class.py"
+BIDDER = FIXTURES_DIR / "bidder.py"
 
 
 def test_verify_round_data_passes_for_pinned_package():
@@ -47,6 +50,48 @@ def test_run_backtest_produces_activity_log_for_round1_starter(tmp_path):
     text = out_path.read_text(encoding="utf-8")
     assert "Activities log:" in text
     assert "Trade History:" in text
+
+
+def test_run_backtest_rejects_invalid_round2_access(tmp_path):
+    with pytest.raises(ValueError, match="round2_access"):
+        run_backtest(STARTER, 1, 0, tmp_path / "out.log", round2_access="bogus")
+
+
+def test_run_backtest_passes_through_round2_access(tmp_path):
+    out_path = run_backtest(STARTER, 2, 0, tmp_path / "out.log", round2_access="accepted")
+    assert out_path.exists()
+
+
+def test_market_access_fee_is_subtracted_once_per_round_not_per_day():
+    # a no-op trader with a fixed bid isolates the fee arithmetic from any
+    # strategy PnL: round2_profit_before_maf must be exactly 0.0 (no
+    # orders placed across all three R2 days merged into one invocation),
+    # so round2_profit_after_maf must be exactly -bid, not -bid*num_days.
+    argv = [
+        sys.executable, "-m", "prosperity4bt", "cli", str(BIDDER), "2",
+        "--round2-access", "accepted", "--no-out", "--no-progress",
+    ]  # fmt: skip
+    proc = subprocess.run(argv, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr
+
+    lines = proc.stdout.splitlines()
+    summary = {}
+    in_block = False
+    for line in lines:
+        if line.strip() == "Round 2 fee-aware summary:":
+            in_block = True
+            continue
+        if in_block:
+            if ":" not in line:
+                break
+            key, _, value = line.strip().partition(":")
+            summary[key.strip()] = value.strip()
+
+    assert summary["round2_profit_before_maf"] == "0"
+    assert summary["bid()"] == "3"
+    # subtracted once (0 - 3 = -3), not once per day (which would be -9
+    # for three merged days at bid=3 each)
+    assert summary["round2_profit_after_maf"] == "-3"
 
 
 def test_run_and_parse_round1_starter_is_flat(tmp_path):

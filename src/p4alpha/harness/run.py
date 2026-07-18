@@ -54,8 +54,23 @@ def verify_round_data() -> None:
         )
 
 
-def run_backtest(algorithm: Path, round_num: int, day_num: int, out_path: Path) -> Path:
+ROUND2_ACCESS_CHOICES = ("unknown", "accepted", "rejected")
+
+
+def run_backtest(
+    algorithm: Path,
+    round_num: int,
+    day_num: int,
+    out_path: Path,
+    *,
+    round2_access: str | None = None,
+) -> Path:
     """Run one round/day backtest and return the path to its activity log.
+
+    round2_access, when given, is passed through as prosperity4btest's
+    --round2-access (PLAN.md §9: Round 2 PnL is reported under
+    --round2-access accepted, since acceptance cannot be simulated
+    locally). Must be one of ROUND2_ACCESS_CHOICES.
 
     Raises ValueError for invalid inputs, FileNotFoundError for a missing
     algorithm file, and BacktestError for anything the subprocess itself
@@ -67,6 +82,8 @@ def run_backtest(algorithm: Path, round_num: int, day_num: int, out_path: Path) 
         raise ValueError(f"day {day_num} is not valid for round {round_num}; expected one of {ROUND_DAYS[round_num]}")
     if not algorithm.is_file():
         raise FileNotFoundError(f"algorithm file not found: {algorithm}")
+    if round2_access is not None and round2_access not in ROUND2_ACCESS_CHOICES:
+        raise ValueError(f"round2_access must be one of {ROUND2_ACCESS_CHOICES}, got {round2_access!r}")
 
     # Partial logs from an earlier interrupted run must never be mistaken for
     # this run's output (PLAN.md §8).
@@ -85,6 +102,8 @@ def run_backtest(algorithm: Path, round_num: int, day_num: int, out_path: Path) 
         str(out_path),
         "--no-progress",
     ]
+    if round2_access is not None:
+        argv.extend(["--round2-access", round2_access])
     proc = subprocess.run(argv, capture_output=True, text=True, check=False)
 
     if proc.returncode != 0:
@@ -112,6 +131,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--round", type=int, choices=sorted(ROUND_DAYS), help="Round number.")
     parser.add_argument("--day", type=int, help="Day number within the round.")
     parser.add_argument("--out", type=Path, help="Path to write the activity log to.")
+    parser.add_argument(
+        "--round2-access", choices=ROUND2_ACCESS_CHOICES, default=None, help="Passed through to prosperity4btest."
+    )
     return parser.parse_args(argv)
 
 
@@ -126,7 +148,9 @@ def main(argv: list[str] | None = None) -> None:
     if args.algorithm is None or args.round is None or args.day is None or args.out is None:
         raise SystemExit("--algorithm, --round, --day and --out are required unless --verify-data is given")
 
-    out_path = run_backtest(args.algorithm, args.round, args.day, args.out)
+    out_path = run_backtest(
+        args.algorithm, args.round, args.day, args.out, round2_access=args.round2_access
+    )
     print(f"Backtest log written to {out_path}")
 
 
