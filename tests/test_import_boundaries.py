@@ -2,7 +2,11 @@
 imports only stdlib and other core/ modules; strategies/ imports only
 stdlib and core/, never another strategy or research/harness/flatten) by
 parsing each file's AST rather than importing it, so a module with a
-currently-broken import still gets checked.
+currently-broken import still gets checked. `datamodel` is allowed for
+strategies/ only: it is the competition's runtime-injected interface
+(Order, TradingState, ...), not a third-party dependency; flatten.py's
+"import stripping" is specifically designed to handle this one import
+when producing a submission file.
 """
 
 from __future__ import annotations
@@ -33,7 +37,7 @@ def _imported_modules(path: Path) -> list[str]:
     return modules
 
 
-def _violation(module: str) -> str | None:
+def _violation(module: str, *, allow_datamodel: bool = False) -> str | None:
     """Return a description of why `module` is disallowed, or None if it's fine."""
     if module.startswith("."):
         return None  # relative import within the same package: always intra-core or intra-strategies
@@ -43,15 +47,17 @@ def _violation(module: str) -> str | None:
         return None
     if module == "p4alpha.core" or module.startswith("p4alpha.core."):
         return None
+    if allow_datamodel and module == "datamodel":
+        return None
 
     return f"imports {module!r}, which is neither stdlib nor p4alpha.core"
 
 
-def _check_dir(directory: Path) -> list[str]:
+def _check_dir(directory: Path, *, allow_datamodel: bool = False) -> list[str]:
     violations = []
     for path in sorted(directory.rglob("*.py")):
         for module in _imported_modules(path):
-            reason = _violation(module)
+            reason = _violation(module, allow_datamodel=allow_datamodel)
             if reason is not None:
                 rel = path.relative_to(REPO_ROOT)
                 violations.append(f"{rel}: {reason}")
@@ -63,9 +69,9 @@ def test_core_imports_only_stdlib_and_core():
     assert violations == [], "core/ must import only stdlib and other core/ modules:\n" + "\n".join(violations)
 
 
-def test_strategies_import_only_stdlib_and_core():
-    violations = _check_dir(STRATEGIES_DIR)
-    assert violations == [], "strategies/ must import only stdlib and core/:\n" + "\n".join(violations)
+def test_strategies_import_only_stdlib_core_and_datamodel():
+    violations = _check_dir(STRATEGIES_DIR, allow_datamodel=True)
+    assert violations == [], "strategies/ must import only stdlib, core/ and datamodel:\n" + "\n".join(violations)
 
 
 def test_strategies_do_not_import_other_strategies():
