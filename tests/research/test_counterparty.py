@@ -7,6 +7,7 @@ from p4alpha.research.counterparty import (
     PRIMARY_HORIZON,
     TradeFeature,
     _floor_p_value,
+    _oriented_p_value,
     assign_buckets,
     benchmark_check,
     causal_regime,
@@ -188,13 +189,21 @@ def _build_informed_vs_noise_scenario():
 
 
 def test_score_bot_recovers_known_informed_signal():
+    # this scenario is single-day (day=0 throughout): resampling_unit="day"
+    # would always resample that same one day, collapsing the CI to a
+    # single point, so "trade" is passed explicitly here to exercise
+    # genuine bootstrap variance (gate review follow-up item 1: every
+    # call site states its resampling_unit explicitly, never relies on
+    # score_bot's own default).
     prices, trades = _build_informed_vs_noise_scenario()
     features = compute_trade_features(prices, trades, day=0, horizons=(PRIMARY_HORIZON,))
     buckets = assign_buckets(features)
     rng = np.random.default_rng(0)
 
-    informed_score = score_bot(features, buckets, "INFORMED", horizon=PRIMARY_HORIZON, rng=rng)
-    noise_score = score_bot(features, buckets, "NOISE", horizon=PRIMARY_HORIZON, rng=rng)
+    informed_score = score_bot(
+        features, buckets, "INFORMED", horizon=PRIMARY_HORIZON, rng=rng, resampling_unit="trade"
+    )
+    noise_score = score_bot(features, buckets, "NOISE", horizon=PRIMARY_HORIZON, rng=rng, resampling_unit="trade")
 
     assert informed_score is not None
     assert noise_score is not None
@@ -209,7 +218,7 @@ def test_score_bot_returns_none_for_bot_with_no_trades():
     buckets = assign_buckets(features)
     rng = np.random.default_rng(0)
 
-    assert score_bot(features, buckets, "NOBODY", horizon=PRIMARY_HORIZON, rng=rng) is None
+    assert score_bot(features, buckets, "NOBODY", horizon=PRIMARY_HORIZON, rng=rng, resampling_unit="trade") is None
 
 
 def test_rank_bots_ranks_informed_above_noise():
@@ -319,6 +328,46 @@ def test_score_bot_day_clustered_ci_wider_than_trade_level_for_correlated_days()
     assert trade_score.resampling_unit == "trade"
 
 
+def test_score_bot_day_clustered_bootstrap_resamples_the_baseline_too():
+    # gate review follow-up item 2: X's own favourable value is an exact
+    # constant (2.0) every day, so X's own contribution to any replicate
+    # is invariant regardless of which days are drawn. COUNTERPARTY
+    # (the bot-excluded baseline) instead varies by day (0.0/1.0/-1.0,
+    # full-sample mean exactly 0.0). If the baseline were held fixed at
+    # its full-sample value across every replicate (the pre-fix
+    # behaviour), every replicate would subtract the same 0.0 and the CI
+    # would collapse to a single point (ci_low == ci_high == 2.0) no
+    # matter which days are resampled. Recomputing the baseline from
+    # each replicate's own sampled days must instead show real,
+    # non-degenerate width, since which of {0.0, 1.0, -1.0} gets
+    # subtracted depends on which days that replicate happens to draw.
+    features = []
+    counterparty_day_values = {0: 0.0, 1: 1.0, 2: -1.0}
+    for day, cp_value in counterparty_day_values.items():
+        for _ in range(100):
+            features.append(
+                TradeFeature(
+                    day=day, timestamp=0, product="FOO", bot="X", direction=1, abs_z=1.0,
+                    favourable={PRIMARY_HORIZON: 2.0},
+                )
+            )
+        for _ in range(100):
+            features.append(
+                TradeFeature(
+                    day=day, timestamp=0, product="FOO", bot="COUNTERPARTY", direction=1, abs_z=1.0,
+                    favourable={PRIMARY_HORIZON: cp_value},
+                )
+            )
+
+    buckets = assign_buckets(features)
+    day_score = score_bot(
+        features, buckets, "X", horizon=PRIMARY_HORIZON, rng=np.random.default_rng(0), resampling_unit="day"
+    )
+
+    assert day_score.score == pytest.approx(2.0)  # point estimate: full-sample baseline is exactly 0.0
+    assert day_score.ci_high - day_score.ci_low > 1.0  # a fixed-baseline bug would give exactly 0.0 width here
+
+
 def test_score_bot_rejects_unknown_resampling_unit():
     prices, trades = _build_informed_vs_noise_scenario()
     features = compute_trade_features(prices, trades, day=0, horizons=(PRIMARY_HORIZON,))
@@ -344,6 +393,39 @@ def test_floor_p_value_reports_exact_fraction_when_nonzero():
     p, floored = _floor_p_value(50, 2000)
     assert floored is False
     assert p == pytest.approx(50 / 2000)
+
+
+# --- oriented p-value: gate review follow-up item 3 -----------------------
+
+
+def test_oriented_p_value_tests_le_zero_tail_for_nonnegative_score():
+    boot_scores = np.array([1.0, 2.0, 3.0, -0.1])
+    p, direction, floored = _oriented_p_value(boot_scores, score=1.5, n_bootstrap=4)
+    assert direction == "<="
+    assert floored is False
+    assert p == pytest.approx(1 / 4)
+
+
+def test_oriented_p_value_tests_ge_zero_tail_for_negative_score():
+    boot_scores = np.array([-1.0, -2.0, -3.0, 0.1])
+    p, direction, floored = _oriented_p_value(boot_scores, score=-1.5, n_bootstrap=4)
+    assert direction == ">="
+    assert floored is False
+    assert p == pytest.approx(1 / 4)
+
+
+def test_oriented_p_value_floors_the_upper_tail_instead_of_printing_bare_one():
+    # a strongly negative score where every replicate is also negative:
+    # the OLD, always-p(score<=0) test would report a bare 1.0 (4/4)
+    # here: exactly the uninterpretable-certainty problem this fix
+    # removes. The oriented test instead evaluates the >=0 tail, finds
+    # zero exceedances, and floors it, never printing a bare 1.0.
+    boot_scores = np.array([-1.0, -2.0, -3.0, -4.0])
+    p, direction, floored = _oriented_p_value(boot_scores, score=-2.5, n_bootstrap=4)
+    assert direction == ">="
+    assert floored is True
+    assert p == pytest.approx(1 / 5)
+    assert p != 1.0
 
 
 # --- raw_trade_audit: hand-verifiable intermediate values -----------------

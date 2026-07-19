@@ -365,7 +365,8 @@ class BotScore:
     score: float
     ci_low: float
     ci_high: float
-    p_value_le_zero: float
+    p_value: float
+    p_value_direction: str  # "<=" or ">=": which one-sided tail p_value tests, oriented to score's sign
     n_trades: int
     n_bootstrap: int
     resampling_unit: str
@@ -395,6 +396,30 @@ def _floor_p_value(exceed_count: int, n_bootstrap: int) -> tuple[float, bool]:
     return exceed_count / n_bootstrap, False
 
 
+def _oriented_p_value(boot_scores: np.ndarray, score: float, n_bootstrap: int) -> tuple[float, str, bool]:
+    """One-sided p-value in the direction of the observed point estimate
+    (gate review item 3): always testing p(bootstrap <= 0) reads
+    backwards for a negative-score bot - it is uninformatively close to
+    1 (and, at the resolution limit, would print a bare, uninterpretable
+    1.0000, the mirror image of the bare-0.0000 problem `_floor_p_value`
+    already guards against). For score >= 0 this tests p(boot <= 0)
+    (evidence against "not positive"); for score < 0 it tests
+    p(boot >= 0) (evidence against "not negative"), so the reported
+    figure always answers "how surprising would this be under the
+    opposite sign", whichever sign the point estimate actually has.
+    _floor_p_value's floor applies symmetrically to whichever tail is
+    tested, so a bare 1.0000 can no longer occur: the tail that would
+    produce it is never the one selected.
+    """
+    if score >= 0:
+        exceed_count = int(np.sum(boot_scores <= 0.0))
+        p, floored = _floor_p_value(exceed_count, n_bootstrap)
+        return p, "<=", floored
+    exceed_count = int(np.sum(boot_scores >= 0.0))
+    p, floored = _floor_p_value(exceed_count, n_bootstrap)
+    return p, ">=", floored
+
+
 def score_bot(
     features: list[TradeFeature],
     buckets: dict[int, int],
@@ -403,21 +428,46 @@ def score_bot(
     horizon: int,
     n_bootstrap: int = N_BOOTSTRAP,
     rng: np.random.Generator,
-    resampling_unit: str = "trade",
+    resampling_unit: str = "day",
 ) -> BotScore | None:
     """resampling_unit="trade" resamples individual trades i.i.d.
     (anti-conservative here: a 500-tick-or-shorter forward horizon means
     trades placed within that many ticks of each other share overlapping
     forward windows and are not independent draws, so this understates
     true uncertainty - kept only as the naive baseline for comparison,
-    per the review). resampling_unit="day" resamples whole days with
-    replacement (a cluster/block bootstrap over the only unit that is
-    genuinely independent here: each day is a separate backtest with its
-    own price path), the statistically defensible choice; the committed
-    ranking uses this. With only 3 days, the cluster bootstrap has very
-    few effectively distinct resamples and correspondingly wide, coarse
-    CIs - an honest consequence of the sample size, not a modelling
-    choice to paper over.
+    per the review). resampling_unit="day" (the default: rank_bots
+    already defaulted to "day", and this function's own default now
+    matches it, gate review follow-up item 1 - a direct caller of
+    score_bot must not silently get handed the anti-conservative
+    method) resamples whole days with replacement (a cluster/block
+    bootstrap over the only unit that is genuinely independent here:
+    each day is a separate backtest with its own price path), the
+    statistically defensible choice; the committed ranking uses this.
+
+    Gate review follow-up item 2: each day-resample recomputes BOTH the
+    bot's own per-bucket mean AND the bot-excluded bucket baseline from
+    that replicate's own sampled days (with a day drawn twice
+    contributing its data twice, the standard block-bootstrap
+    duplication rule), not just the final aggregation over a baseline
+    fixed from the full sample. The original day-bootstrap held
+    baseline_by_bucket fixed across every replicate, understating
+    uncertainty in the same way (though a smaller effect than) the
+    trade-level i.i.d. bootstrap already corrected: the baseline is
+    itself estimated from data and carries its own sampling variance,
+    which a bootstrap must propagate to be honest. Bucket ASSIGNMENT
+    (which tertile each trade falls in) stays fixed across replicates by
+    design, not recomputed per resample: it is a property of the pooled,
+    all-bots |z| distribution (assign_buckets), a structural feature of
+    the market regime at the moment of each trade, not a statistic being
+    tested for significance the way the score itself is. With only 3
+    days, the cluster bootstrap has very few effectively distinct
+    resamples and correspondingly wide, coarse CIs - an honest
+    consequence of the sample size, not a modelling choice to paper
+    over. If a replicate's sampled days happen to miss every day this
+    bot traded on, that replicate contributes a score of 0.0 (no
+    evidence either way that day) rather than being dropped, which
+    widens the CI further - the honest consequence of a sparse bot
+    across only 3 possible day-clusters, not smoothed over.
     """
     bot_indices = [i for i, f in enumerate(features) if f.bot == bot and horizon in f.favourable]
     if not bot_indices:
@@ -440,19 +490,33 @@ def score_bot(
             sample = rng.choice(excess, size=n, replace=True)
             boot_scores[b] = sample.mean()
     else:
-        days_by_index = [features[i].day for i in bot_indices]
-        excess_by_day: dict[int, np.ndarray] = {}
-        for day in set(days_by_index):
-            excess_by_day[day] = excess[[j for j, d in enumerate(days_by_index) if d == day]]
-        unique_days = sorted(excess_by_day)
+        all_days = sorted({f.day for f in features if horizon in f.favourable})
+        own_by_day_bucket: dict[tuple[int, int], list[float]] = {}
+        other_by_day_bucket: dict[tuple[int, int], list[float]] = {}
+        for i, f in enumerate(features):
+            if horizon not in f.favourable or buckets[i] not in bot_buckets:
+                continue
+            key = (f.day, buckets[i])
+            target = own_by_day_bucket if f.bot == bot else other_by_day_bucket
+            target.setdefault(key, []).append(f.favourable[horizon])
+
         for b in range(n_bootstrap):
-            sampled_days = rng.choice(unique_days, size=len(unique_days), replace=True)
-            pooled = np.concatenate([excess_by_day[d] for d in sampled_days])
-            boot_scores[b] = pooled.mean()
+            sampled_days = rng.choice(all_days, size=len(all_days), replace=True)
+            replicate_excess: list[float] = []
+            for bucket in bot_buckets:
+                own_vals: list[float] = []
+                other_vals: list[float] = []
+                for d in sampled_days:
+                    own_vals.extend(own_by_day_bucket.get((d, bucket), []))
+                    other_vals.extend(other_by_day_bucket.get((d, bucket), []))
+                if not own_vals:
+                    continue
+                baseline = float(np.mean(other_vals)) if other_vals else 0.0
+                replicate_excess.extend(v - baseline for v in own_vals)
+            boot_scores[b] = float(np.mean(replicate_excess)) if replicate_excess else 0.0
 
     ci_low, ci_high = float(np.percentile(boot_scores, 2.5)), float(np.percentile(boot_scores, 97.5))
-    exceed_count = int(np.sum(boot_scores <= 0.0))
-    p_le_zero, floored = _floor_p_value(exceed_count, n_bootstrap)
+    p_value, direction, floored = _oriented_p_value(boot_scores, score, n_bootstrap)
 
     return BotScore(
         bot=bot,
@@ -460,7 +524,8 @@ def score_bot(
         score=score,
         ci_low=ci_low,
         ci_high=ci_high,
-        p_value_le_zero=p_le_zero,
+        p_value=p_value,
+        p_value_direction=direction,
         n_trades=n,
         n_bootstrap=n_bootstrap,
         resampling_unit=resampling_unit,
@@ -571,17 +636,19 @@ def render_counterparty_markdown(
         "- standard deviations of local price movement (excess normalised "
         "favourable move, see methodology paragraph above), not a price or "
         "currency unit. **Bootstrap**: B=2000 resamples, day-clustered. "
-        "**p-value convention**: a floored value is written `<= 1/(B+1)` "
-        "(here `<= 0.0005`), never a bare `0.0000`, per the Stage 3/4 "
-        "standing convention (`_floor_p_value`) - it reports the "
-        "resolution limit of B resamples, not a false claim of exact zero."
+        "**p-value convention**: one-sided, oriented to the score's own "
+        "sign (table note below); a floored value is written `<= 1/(B+1)` "
+        "(here `<= 0.0005`), never a bare `0.0000` OR a bare `1.0000` "
+        "(gate review follow-up item 3), per the Stage 3/4 standing "
+        "convention (`_floor_p_value`) - it reports the resolution limit "
+        "of B resamples, not a false claim of exact certainty either way."
     )
     lines.append("")
     lines.append(
         "| Bot | Score (dimensionless, SD units) | 95% CI (day-clustered) | "
-        "p(score <= 0) | Verdict | n trades | n days |"
+        "One-sided p-value (oriented to score's sign) | Verdict | n trades | n days |"
     )
-    lines.append("|---|---:|---|---:|---|---:|---:|")
+    lines.append("|---|---:|---|---|---|---:|---:|")
 
     def _sort_key(kv: tuple[str, dict[int, BotScore]]) -> float:
         horizon_scores = kv[1]
@@ -593,11 +660,25 @@ def render_counterparty_markdown(
             continue
         s = horizon_scores[PRIMARY_HORIZON]
         n_days = len({f.day for f in features if f.bot == bot})
-        p_str = f"<= {s.p_value_le_zero:.4f}" if s.p_value_floored else f"{s.p_value_le_zero:.4f}"
+        floor_marker = "<= " if s.p_value_floored else ""
+        p_str = f"p(score {s.p_value_direction} 0) {floor_marker}{s.p_value:.4f}"
         lines.append(
             f"| {bot} | {s.score:.4f} | [{s.ci_low:.4f}, {s.ci_high:.4f}] | {p_str} | "
             f"{_verdict(s)} | {s.n_trades} | {n_days} |"
         )
+    lines.append("")
+    lines.append(
+        "**p-value orientation** (gate review follow-up item 3): always "
+        "reporting p(score <= 0) reads backwards for a negative-score bot "
+        "(uninformatively close to 1, and at the resolution limit would "
+        "print a bare, uninterpretable 1.0000 - the mirror image of the "
+        "bare-0.0000 problem the floor convention already guards "
+        "against). Each row instead tests the tail opposite the point "
+        "estimate's own sign - p(score <= 0) for a non-negative score, "
+        "p(score >= 0) for a negative one - so the number always answers "
+        "\"how surprising would this be under the opposite sign\", "
+        "floored symmetrically at `<= 1/(B+1)` whichever tail is tested."
+    )
     lines.append("")
 
     lines.append("## 2. Bootstrap resampling unit: day-clustered vs trade-level (gate review item 1)")

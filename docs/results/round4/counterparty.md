@@ -8,17 +8,19 @@ Methodology pre-registered in `research/counterparty.py`'s module docstring befo
 
 ## 1. Ranking at primary horizon (500 ticks), day-clustered bootstrap
 
-**Units** (gate review item 5): Score and 95% CI are dimensionless - standard deviations of local price movement (excess normalised favourable move, see methodology paragraph above), not a price or currency unit. **Bootstrap**: B=2000 resamples, day-clustered. **p-value convention**: a floored value is written `<= 1/(B+1)` (here `<= 0.0005`), never a bare `0.0000`, per the Stage 3/4 standing convention (`_floor_p_value`) - it reports the resolution limit of B resamples, not a false claim of exact zero.
+**Units** (gate review item 5): Score and 95% CI are dimensionless - standard deviations of local price movement (excess normalised favourable move, see methodology paragraph above), not a price or currency unit. **Bootstrap**: B=2000 resamples, day-clustered. **p-value convention**: one-sided, oriented to the score's own sign (table note below); a floored value is written `<= 1/(B+1)` (here `<= 0.0005`), never a bare `0.0000` OR a bare `1.0000` (gate review follow-up item 3), per the Stage 3/4 standing convention (`_floor_p_value`) - it reports the resolution limit of B resamples, not a false claim of exact certainty either way.
 
-| Bot | Score (dimensionless, SD units) | 95% CI (day-clustered) | p(score <= 0) | Verdict | n trades | n days |
-|---|---:|---|---:|---|---:|---:|
-| Mark 14 | 1.4532 | [1.3593, 1.6286] | <= 0.0005 | SIGNIFICANT, positive | 2037 | 3 |
-| Mark 01 | 1.0647 | [0.8364, 1.3432] | <= 0.0005 | SIGNIFICANT, positive | 1111 | 3 |
-| Mark 67 | 0.0171 | [-0.3383, 0.2433] | 0.3770 | not significant (CI includes zero) | 151 | 3 |
-| Mark 55 | -0.5194 | [-0.8527, 0.0156] | 0.9660 | not significant (CI includes zero) | 1122 | 3 |
-| Mark 49 | -0.5208 | [-1.2951, 0.4664] | 0.8520 | not significant (CI includes zero) | 112 | 3 |
-| Mark 22 | -1.0406 | [-1.2413, -0.7159] | 1.0000 | SIGNIFICANT, negative | 872 | 3 |
-| Mark 38 | -1.5761 | [-1.8489, -1.1296] | 1.0000 | SIGNIFICANT, negative | 1379 | 3 |
+| Bot | Score (dimensionless, SD units) | 95% CI (day-clustered) | One-sided p-value (oriented to score's sign) | Verdict | n trades | n days |
+|---|---:|---|---|---|---:|---:|
+| Mark 14 | 1.4532 | [1.2986, 1.6844] | p(score <= 0) <= 0.0005 | SIGNIFICANT, positive | 2037 | 3 |
+| Mark 01 | 1.0647 | [0.7893, 1.4216] | p(score <= 0) <= 0.0005 | SIGNIFICANT, positive | 1111 | 3 |
+| Mark 67 | 0.0171 | [-0.3445, 0.2496] | p(score <= 0) 0.3770 | not significant (CI includes zero) | 151 | 3 |
+| Mark 55 | -0.5194 | [-0.9355, 0.1262] | p(score >= 0) 0.0340 | not significant (CI includes zero) | 1122 | 3 |
+| Mark 49 | -0.5208 | [-1.3070, 0.4826] | p(score >= 0) 0.1480 | not significant (CI includes zero) | 112 | 3 |
+| Mark 22 | -1.0406 | [-1.3001, -0.6560] | p(score >= 0) <= 0.0005 | SIGNIFICANT, negative | 872 | 3 |
+| Mark 38 | -1.5761 | [-1.8933, -1.0025] | p(score >= 0) <= 0.0005 | SIGNIFICANT, negative | 1379 | 3 |
+
+**p-value orientation** (gate review follow-up item 3): always reporting p(score <= 0) reads backwards for a negative-score bot (uninformatively close to 1, and at the resolution limit would print a bare, uninterpretable 1.0000 - the mirror image of the bare-0.0000 problem the floor convention already guards against). Each row instead tests the tail opposite the point estimate's own sign - p(score <= 0) for a non-negative score, p(score >= 0) for a negative one - so the number always answers "how surprising would this be under the opposite sign", floored symmetrically at `<= 1/(B+1)` whichever tail is tested.
 
 ## 2. Bootstrap resampling unit: day-clustered vs trade-level (gate review item 1)
 
@@ -26,13 +28,13 @@ A 500-tick (or shorter) forward horizon means trades placed within that many tic
 
 | Bot | CI (day-clustered) | CI (trade-level, anti-conservative) | Survives correction? |
 |---|---|---|---|
-| Mark 14 | [1.3593, 1.6286] | [1.2632, 1.6395] | yes, both significant |
-| Mark 01 | [0.8364, 1.3432] | [0.7879, 1.3250] | yes, both significant |
-| Mark 67 | [-0.3383, 0.2433] | [-0.6017, 0.6793] | yes, both not significant |
-| Mark 55 | [-0.8527, 0.0156] | [-0.7683, -0.2707] | **NO - significance depends on resampling unit** |
-| Mark 49 | [-1.2951, 0.4664] | [-1.2329, 0.1925] | yes, both not significant |
-| Mark 22 | [-1.2413, -0.7159] | [-1.3286, -0.7225] | yes, both significant |
-| Mark 38 | [-1.8489, -1.1296] | [-1.8103, -1.3477] | yes, both significant |
+| Mark 14 | [1.2986, 1.6844] | [1.2632, 1.6395] | yes, both significant |
+| Mark 01 | [0.7893, 1.4216] | [0.7879, 1.3250] | yes, both significant |
+| Mark 67 | [-0.3445, 0.2496] | [-0.6017, 0.6793] | yes, both not significant |
+| Mark 55 | [-0.9355, 0.1262] | [-0.7683, -0.2707] | **NO - significance depends on resampling unit** |
+| Mark 49 | [-1.3070, 0.4826] | [-1.2329, 0.1925] | yes, both not significant |
+| Mark 22 | [-1.3001, -0.6560] | [-1.3286, -0.7225] | yes, both significant |
+| Mark 38 | [-1.8933, -1.0025] | [-1.8103, -1.3477] | yes, both significant |
 
 **Mark 55 does not survive the correction**: significant negative under trade-level (anti-conservative) resampling, but its day-clustered 95% CI includes zero. With only 3 independent day-clusters, this project cannot make a statistically confident claim that Mark 55 is worse than an average trader, only that the point estimate is negative (see section 5 for the descriptive, non-statistical evidence that still exists). Mark 14, Mark 01, Mark 22 and Mark 38 all survive: significant under both resampling units, same sign.
 
@@ -129,8 +131,8 @@ Mark 01's 36.8% is not anomalous: Mark 22 (a bot this analysis scores significan
 
 Compared only after the ranking above was computed: the retrospective's stated informed bots are Mark 14, Mark 55. Where this blind analysis disagrees, the data wins, not the retrospective - but "disagrees" is stated at the precision the day-clustered bootstrap actually supports, not overclaimed.
 
-- **Mark 14**: rank 1/7, score 1.4532, 95% CI (day-clustered) [1.3593, 1.6286] - **CONFIRMED (significantly positive, day-clustered)**.
-- **Mark 55**: rank 4/7, score -0.5194, 95% CI (day-clustered) [-0.8527, 0.0156] - **NOT STATISTICALLY SIGNIFICANT (day-clustered CI includes zero); point estimate negative (-0.5194) and section 5's descriptive evidence (43.7% hit rate, FRUIT-exclusive, monotone-in-regime) leans against the retrospective's claim, but 3 days of data cannot support a confident contradiction**.
+- **Mark 14**: rank 1/7, score 1.4532, 95% CI (day-clustered) [1.2986, 1.6844] - **CONFIRMED (significantly positive, day-clustered)**.
+- **Mark 55**: rank 4/7, score -0.5194, 95% CI (day-clustered) [-0.9355, 0.1262] - **NOT STATISTICALLY SIGNIFICANT (day-clustered CI includes zero); point estimate negative (-0.5194) and section 5's descriptive evidence (43.7% hit rate, FRUIT-exclusive, monotone-in-regime) leans against the retrospective's claim, but 3 days of data cannot support a confident contradiction**.
 
 **New finding, not in the retrospective**: Mark 01 also scores significantly positive (day-clustered 95% CI excludes zero) at the primary horizon, robust across all three horizons (section 3), at a magnitude comparable to Mark 14's.
 
