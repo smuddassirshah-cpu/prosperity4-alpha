@@ -64,6 +64,7 @@ def run_backtest(
     out_path: Path,
     *,
     round2_access: str | None = None,
+    counterparty_info: bool | None = None,
 ) -> Path:
     """Run one round/day backtest and return the path to its activity log.
 
@@ -71,6 +72,13 @@ def run_backtest(
     --round2-access (PLAN.md §9: Round 2 PnL is reported under
     --round2-access accepted, since acceptance cannot be simulated
     locally). Must be one of ROUND2_ACCESS_CHOICES.
+
+    counterparty_info, when given, is passed through as prosperity4btest's
+    --counterparty-info/--no-counterparty-info (default True in the
+    engine; None here means "don't pass the flag, use the engine's own
+    default"). Stage 6's round4.py degradation path is verified with
+    counterparty_info=False (STATE.md decisions log, docs/results/round4/
+    backtest.md).
 
     Raises ValueError for invalid inputs, FileNotFoundError for a missing
     algorithm file, and BacktestError for anything the subprocess itself
@@ -104,6 +112,8 @@ def run_backtest(
     ]
     if round2_access is not None:
         argv.extend(["--round2-access", round2_access])
+    if counterparty_info is not None:
+        argv.append("--counterparty-info" if counterparty_info else "--no-counterparty-info")
     proc = subprocess.run(argv, capture_output=True, text=True, check=False)
 
     if proc.returncode != 0:
@@ -134,6 +144,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--round2-access", choices=ROUND2_ACCESS_CHOICES, default=None, help="Passed through to prosperity4btest."
     )
+    parser.add_argument(
+        "--counterparty-info",
+        dest="counterparty_info",
+        action="store_true",
+        default=None,
+        help="Passed through to prosperity4btest as --counterparty-info.",
+    )
+    parser.add_argument(
+        "--no-counterparty-info",
+        dest="counterparty_info",
+        action="store_false",
+        help="Passed through to prosperity4btest as --no-counterparty-info.",
+    )
     return parser.parse_args(argv)
 
 
@@ -149,7 +172,12 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit("--algorithm, --round, --day and --out are required unless --verify-data is given")
 
     out_path = run_backtest(
-        args.algorithm, args.round, args.day, args.out, round2_access=args.round2_access
+        args.algorithm,
+        args.round,
+        args.day,
+        args.out,
+        round2_access=args.round2_access,
+        counterparty_info=args.counterparty_info,
     )
     print(f"Backtest log written to {out_path}")
 

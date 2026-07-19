@@ -62,6 +62,28 @@ def test_run_backtest_passes_through_round2_access(tmp_path):
     assert out_path.exists()
 
 
+def test_run_backtest_passes_through_counterparty_info_false(tmp_path):
+    out_path = run_backtest(STARTER, 4, 1, tmp_path / "out.log", counterparty_info=False)
+    assert out_path.exists()
+
+
+def test_run_backtest_passes_through_counterparty_info_true(tmp_path):
+    out_path = run_backtest(STARTER, 4, 1, tmp_path / "out.log", counterparty_info=True)
+    assert out_path.exists()
+
+
+def test_parse_args_counterparty_info_defaults_to_none():
+    args = _parse_args(["--algorithm", str(STARTER), "--round", "4", "--day", "1", "--out", "/tmp/out.log"])
+    assert args.counterparty_info is None
+
+
+def test_parse_args_no_counterparty_info_sets_false():
+    args = _parse_args(
+        ["--algorithm", str(STARTER), "--round", "4", "--day", "1", "--out", "/tmp/out.log", "--no-counterparty-info"]
+    )
+    assert args.counterparty_info is False
+
+
 def test_market_access_fee_is_subtracted_once_per_round_not_per_day():
     # a no-op trader with a fixed bid isolates the fee arithmetic from any
     # strategy PnL: round2_profit_before_maf must be exactly 0.0 (no
