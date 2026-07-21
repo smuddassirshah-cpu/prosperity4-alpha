@@ -31,9 +31,19 @@ packages = ["src/p4alpha"]
 [tool.ruff]
 line-length = 120
 src = ["src", "tests"]
+# submissions/ is a generated build artefact (src/p4alpha/flatten/flatten.py,
+# Stage 8): concatenated from already-lint-clean source, so linting it again
+# fights the tool for no benefit (e.g. isort cannot see one clean top-of-file
+# import block once several modules' own tiny import sections are concatenated
+# in sequence). Correctness is judged by the parity harness and the dedicated
+# syntax/banned-import tests (tests/flatten/), not ruff.
+extend-exclude = ["submissions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "parity: full-engine flatten<->source PnL parity backtests against real round data (slow); run explicitly via `-m parity`, e.g. by the flatten-parity CI job",
+]

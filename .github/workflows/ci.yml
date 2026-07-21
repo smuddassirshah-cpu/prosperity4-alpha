@@ -1,4 +1,3 @@
-# flatten-parity job joins this workflow at Stage 8, once submissions/ exists.
 name: CI
 
 on:
@@ -8,23 +7,49 @@ on:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
         with:
           version: "0.11.29"
-      - run: uv python install 3.12
-      - run: uv sync --extra dev --extra research
-      - run: uv run ruff check .
-      - run: uv run pytest -q
+      - run: uv python install ${{ matrix.python-version }}
+      - run: uv sync --extra dev --extra research --python ${{ matrix.python-version }}
+      - run: uv run --python ${{ matrix.python-version }} ruff check .
+      # parity-marked tests (tests/flatten/test_parity.py) are real-engine
+      # backtests, slower than the rest of this suite; excluded here and run
+      # explicitly by the dedicated flatten-parity job below.
+      - run: uv run --python ${{ matrix.python-version }} pytest -q -m "not parity"
 
   pip-audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
         with:
           version: "0.11.29"
       - run: uv python install 3.12
       - run: uv sync --extra dev --extra research
       - run: uv run pip-audit
+
+  flatten-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
+        with:
+          version: "0.11.29"
+      - run: uv python install 3.12
+      # stdlib-only (flatten.py, harness/run.py, harness/attribution.py):
+      # no research extras needed for this job.
+      - run: uv sync --extra dev
+      # Explicit, standalone freshness gate: fails loudly on a stale/hand-
+      # edited committed submission before any test runs, independent of
+      # pytest's own test-execution order (PLAN.md §6: "diff-checked in CI").
+      - run: uv run python -m p4alpha.flatten.flatten --check
+      # tests/flatten/ picked up with no -m filter: both the fast structural
+      # checks and the parity-marked real-engine backtests run here.
+      - run: uv run pytest tests/flatten/ -q
