@@ -35,21 +35,7 @@ jobs:
       - run: uv sync --extra dev --extra research
       - run: uv run pip-audit
 
-  flatten-parity:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9.0.0
-        with:
-          version: "0.11.29"
-      - run: uv python install 3.12
-      # stdlib-only (flatten.py, harness/run.py, harness/attribution.py):
-      # no research extras needed for this job.
-      - run: uv sync --extra dev
-      # Explicit, standalone freshness gate: fails loudly on a stale/hand-
-      # edited committed submission before any test runs, independent of
-      # pytest's own test-execution order (PLAN.md §6: "diff-checked in CI").
-      - run: uv run python -m p4alpha.flatten.flatten --check
-      # tests/flatten/ picked up with no -m filter: both the fast structural
-      # checks and the parity-marked real-engine backtests run here.
-      - run: uv run pytest tests/flatten/ -q
+# flatten-parity moved to its own workflow (flatten-parity.yml, Phase 3):
+# it has a paths-ignore for docs-only pushes, which GitHub Actions can only
+# express at the workflow level, not per-job. lint-and-test and pip-audit
+# above stay unconditional, exactly as before.
